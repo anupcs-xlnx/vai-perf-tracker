@@ -1,190 +1,209 @@
-# VAI 6.2 QoR Performance Tracker
+# VAI Perf Tracker
 
-Automated daily dashboard tracking VART latency for all P0 and O3 models across the Vitis AI 6.2
-release cycle. Produces dark-themed AMD-styled HTML dashboards with trend charts, milestone markers,
-and per-model detail tables. Served live at `http://xcoanupcs40x:8742/`.
+Automated daily latency dashboard for AMD Vitis AI QoR tracking. Pulls nightly VART test results
+from an Elasticsearch test database (XOAH) via YODATools, appends to a history CSV, and generates
+dark-themed AMD-styled HTML dashboards served over HTTP.
 
----
-
-## What this does
-
-Each daily run:
-
-1. Reads the baseline workbook (targets, VAI 6.1 latency, model metadata)
-2. Queries XOAH via YODATools for all nightly suite runs not yet in the history CSV
-3. Reads the board log file for each test run and extracts VART latency
-4. Merges new records into the canonical history CSV (CSV is the long-term cache)
-5. Writes dated HTML snapshots + `latest.html` for each suite
-6. Regenerates the `index.html` landing page
-
-**Key dates tracked:**
-
-| Milestone | Date |
-|-----------|------|
-| RC2 | May 13, 2026 |
-| QoR Checkpoint | May 18, 2026 |
-| FV Bash | May 20, 2026 |
+Inspired by [Praveen Iyer's perf tracker](http://fisweb:8080/proj/vaiml_int/staff/praveeni/perf_tracker).
 
 ---
 
-## Directory layout
+## Dashboard pages
+
+### Landing page (`index.html`)
+
+The landing page shows:
+- **Milestone timeline** — key release dates (RC1, RC2, RC2+, Field Bash, etc.) with a "days remaining" countdown
+- **Suite calendar** — which suite ran on which date, color-coded pass/fail
+- **Field Bash models** — a focused table of the subset of models being demonstrated at the Field Validation event, with RC1 and RC2+ goal comparisons
+
+### Daily snapshot (`<SUITE>/<YYYY-MM-DD>.html`)
+
+Each suite gets one HTML file per day. The page has two main sections:
+
+**Summary table** (top)
+
+One row per model. Columns:
+
+| Column | What it shows |
+|--------|---------------|
+| Model | Human-readable model name (links to the detail card below) |
+| Customer | Customer or program the model belongs to |
+| VAI 6.2 Latency | Measured VART latency for this run, in ms. Steel-blue border. |
+| Suite | Which XOAH suite run produced this result |
+| VAI 6.2 Goal | RC2+ target latency in ms. Muted-red border. |
+| RC1 Goal | RC1 target latency in ms |
+| VAI 6.1 Latency | Baseline from the prior release for reference |
+| Trend | Direction vs ~7 days ago (↑ worse, ↓ better, — no prior data) |
+| Bash | Whether this model is on the Field Bash demo list |
+
+**Row color coding:**
+- Green — at or below goal
+- Yellow — within 5% of goal
+- Red — more than 5% above goal
+- Gray — no goal defined for this model
+
+**RC2+ goal change footnote:** If any model's RC2+ goal changed since initial publication (tracked from a live spreadsheet), the changed cells are marked with a gold `*` and a footnote table below the summary lists the before/after values and dates.
+
+**Per-model detail cards** (below summary)
+
+Clicking a model name in the summary table scrolls to its detail card. Each card shows:
+- A latency trend chart with milestone markers
+- A full table of every historical run with date, latency, and the suite that produced it
+
+### Latest symlink (`<SUITE>_latest.html`)
+
+Always points to the most recent snapshot. Bookmark this for day-to-day monitoring.
+
+---
+
+## Dashboard design decisions
+
+**Dark AMD theme.** Black background (`#000000`), white text (`#ffffff`), AMD corporate colors for
+accents. Off-white background for the summary table to make it easy to read at a glance.
+
+**Column border highlights instead of background colors.** The latency and goal columns use colored
+borders (steel-blue and muted-red respectively) rather than background color fills. This preserves
+the green/yellow/red row status colors so you can see at a glance which models are on track without
+the column highlight masking the row status.
+
+**`(ms)` in lowercase.** CSS `text-transform: uppercase` is applied to table headers for visual
+consistency. The `(ms)` unit is wrapped in `<span style="text-transform:none">` to prevent it from
+being rendered as `(MS)`.
+
+**History CSV as the long-term cache.** XOAH only retains run data for a limited time. The pipeline
+writes every fetched result to a CSV immediately. On subsequent runs, already-fetched rows are
+skipped. Run the pipeline daily or you will lose data that falls out of XOAH's retention window.
+
+**Trend indicator uses a 7-day lookback with fallback.** The trend column compares today's latency
+to the closest reading at least 7 days prior. If no reading exists that far back, it falls back to
+the oldest available reading. If this is the very first entry for a model, it shows `N/A` (no prior
+data exists yet, not a missing reading).
+
+**Live RC2+ goal sync.** The RC2+ goal values in `model_goals.py` are hardcoded as a safe fallback.
+A separate daily script (`deploy/sync_rc2_goals.py`) downloads the live goals spreadsheet from
+SharePoint via the Microsoft Graph API, diffs column D of the `impr_6.2` tab against the current
+values, and writes any changes to `src/perf_tracker/rc2_goals_live.json`. This file is loaded at
+import time by `model_goals.py` to override the hardcoded values. A persistent changelog
+(`rc2_goal_changes.json`) records every change with date, old value, and new value — this powers
+the `*` asterisk footnote in the dashboard.
+
+**Token auto-refresh for SharePoint access.** The Microsoft Graph access token expires in ~1 hour.
+The sync script checks the `expires_at` field in `~/.config/microsoft-graph/token.json` and
+refreshes it automatically using the refresh token (valid ~90 days) before downloading the
+spreadsheet. The refreshed token is written back to disk. No manual action is needed unless the
+refresh token itself expires.
+
+**PDT timezone display.** All timestamps are shown in PDT (UTC-7). The VDI runs MDT (UTC-6); the
+pipeline applies a `-1h` offset before rendering timestamps. The systemd timer fires at
+12:07 MDT = **11:07 AM PDT**.
+
+---
+
+## Repository layout
 
 ```
 perf_tracker/
-├── src/perf_tracker/       # Python package
-│   ├── config.py           # Config loading
-│   ├── dashboard.py        # HTML generation (dark AMD theme)
-│   ├── history.py          # History CSV read/write
-│   ├── milestones.py       # RC2 / QoR checkpoint / FV Bash dates
-│   ├── pipeline.py         # Orchestration
-│   ├── workbook.py         # Excel parsing
-│   └── xoah.py             # XOAH query + board log extraction
+├── src/perf_tracker/           # Python package
+│   ├── config.py               # Config loading
+│   ├── dashboard.py            # HTML generation
+│   ├── history.py              # History CSV read/write
+│   ├── milestones.py           # Milestone dates
+│   ├── model_goals.py          # RC1/RC2+ goals per model; loads live overrides at import
+│   ├── pipeline.py             # Orchestration
+│   ├── workbook.py             # Excel baseline parsing
+│   └── xoah.py                 # XOAH query + board log extraction via YODATools
 ├── scripts/
-│   └── run_dashboard.py    # CLI entry point
+│   └── run_dashboard.py        # CLI entry point
 ├── config/
-│   ├── tracking_config.json         # Mac / dev config
-│   └── tracking_config_vdi.json     # VDI production config
+│   ├── tracking_config.json         # Dev config (Mac paths)
+│   └── tracking_config_vdi.json     # Production config (VDI paths)
 ├── deploy/
-│   ├── install.sh           # One-time VDI setup
-│   ├── vdi.md               # Step-by-step VDI deploy instructions
-│   ├── gen_index.py         # Generates index.html landing page
-│   ├── perf-dashboard.service  # systemd oneshot generator
-│   ├── perf-dashboard.timer     # systemd daily timer (12:07)
+│   ├── install.sh               # One-time VDI venv setup
+│   ├── vdi.md                   # Step-by-step VDI deploy guide
+│   ├── gen_index.py             # Generates index.html landing page
+│   ├── sync_rc2_goals.py        # Downloads live RC2+ goals from SharePoint
+│   ├── perf-dashboard.service   # systemd oneshot (sync goals → dashboard → index)
+│   ├── perf-dashboard.timer     # systemd daily timer
 │   └── perf-server.service      # systemd HTTP server (port 8742)
-└── artifacts/               # Generated outputs (not committed)
+└── artifacts/                   # Generated outputs (not committed)
     ├── history/
-    │   ├── VE2_QOR_P0_HW.csv
-    │   └── VE2_QOR_O3_HW.csv
+    │   └── <SUITE>.csv
     └── dashboard/
         ├── index.html
-        ├── VE2_QOR_P0_HW_latest.html
-        ├── VE2_QOR_P0_HW/YYYY-MM-DD.html
-        ├── VE2_QOR_O3_HW_latest.html
-        └── VE2_QOR_O3_HW/YYYY-MM-DD.html
+        ├── <SUITE>_latest.html
+        └── <SUITE>/YYYY-MM-DD.html
 ```
 
 ---
 
-## Daily operations
+## Dependencies
 
-### Normal day — automated
-
-The systemd timer fires at **12:07 every day** and runs the full pipeline automatically.
-Nothing needs to be done manually on a normal day.
-
-```bash
-# Verify the timer will fire
-systemctl --user status perf-dashboard.timer
-
-# See when it last ran and what happened
-journalctl --user -u perf-dashboard.service --since "24 hours ago"
-```
-
-### Trigger a manual refresh
-
-```bash
-systemctl --user start perf-dashboard.service
-
-# Watch the log in real time
-journalctl --user -u perf-dashboard.service -f
-```
-
-### Drop a new workbook (refresh without waiting for XOAH)
-
-When the baseline workbook is updated (targets change, new models added):
-
-```bash
-XOAHENV=/wrk/xcohdnobkup4/anupcs/vai/vai-6-2/qor/xoahenv
-TRACKER=/wrk/xcohdnobkup4/anupcs/vai/vai-6-2/qor/perf_tracker
-CONFIG=$TRACKER/config/tracking_config_vdi.json
-
-# Copy the new workbook to the expected location
-cp /path/to/new_baselines.xlsx \
-   /wrk/xcohdnobkup4/anupcs/vai/vai-6-2/qor/VAI_6.2_P0_QOR_dashboard_baselines.xlsx
-
-# Regenerate using cached XOAH history + new workbook (fast, no XOAH fetch)
-$XOAHENV/bin/python $TRACKER/scripts/run_dashboard.py --from-workbook \
-    /wrk/xcohdnobkup4/anupcs/vai/vai-6-2/qor/VAI_6.2_P0_QOR_dashboard_baselines.xlsx \
-    $CONFIG
-```
-
-### Regenerate from a history CSV
-
-If you have a corrected or externally produced CSV and want to regenerate the dashboard without
-touching XOAH or the workbook:
-
-```bash
-XOAHENV=/wrk/xcohdnobkup4/anupcs/vai/vai-6-2/qor/xoahenv
-TRACKER=/wrk/xcohdnobkup4/anupcs/vai/vai-6-2/qor/perf_tracker
-
-$XOAHENV/bin/python $TRACKER/scripts/run_dashboard.py \
-    --from-csv /wrk/xcohdnobkup4/anupcs/vai/vai-6-2/qor/artifacts/history/VE2_QOR_P0_HW.csv \
-    $TRACKER/config/tracking_config_vdi.json
-```
-
-### Regenerate the index landing page
-
-The landing page is also regenerated automatically after each pipeline run. To regenerate it
-standalone:
-
-```bash
-/wrk/xcohdnobkup4/anupcs/vai/vai-6-2/qor/xoahenv/bin/python \
-    /wrk/xcohdnobkup4/anupcs/vai/vai-6-2/qor/perf_tracker/deploy/gen_index.py \
-    /wrk/xcohdnobkup4/anupcs/vai/vai-6-2/qor/artifacts/dashboard
-```
+- **Python 3.10+**
+- **YODATools** — AMD internal library for querying XOAH (Elasticsearch test database). Not a pip package; lives on the shared NFS filesystem at `/proj/testcases/xtc/tools/PROD/libs/python`. Made importable via a `.pth` file in the Python environment.
+- **elasticsearch < 8** — YODATools uses the v7 API; v8 removes the `host=` kwarg and breaks it.
+- **openpyxl** — for reading the baseline workbook and the live goals spreadsheet
+- **pyyaml**, **pexpect**, **cachetools**, **numpy**, **pandas**, **requests**, **paramiko** — YODATools dependencies
 
 ---
 
 ## Data flow
 
 ```
-workbook (.xlsx)          XOAH database
-     │                        │
-     │  model metadata        │  nightly test runs (via YODATools)
-     │  (targets, VAI 6.1)    │  → reads board log → VART latency
-     └──────────┬─────────────┘
-                │
-          pipeline.py
-                │
-          history CSV  ←── long-term cache, survives XOAH retention
-                │
-          dashboard.py
-                │
-          HTML snapshots + index.html
-                │
-          http.server (port 8742)
-                │
-          browser
-```
+XOAH (Elasticsearch)
+    └── YODATools → board log files → VART latency
+           │
+       pipeline.py
+           │
+       history CSV  ←── permanent record; survives XOAH retention window
+           │
+       dashboard.py → dated HTML snapshots + latest.html
+           │
+       gen_index.py → index.html landing page
+           │
+       http.server (port 8742)
 
-**Why the history CSV matters:** XOAH only retains run data for a limited time. The CSV is the
-permanent record. The pipeline never re-fetches a suite run already in the CSV. Run it daily so
-nothing falls out of XOAH's retention window before being captured.
+SharePoint XLSX
+    └── sync_rc2_goals.py → rc2_goals_live.json → model_goals.py (overrides)
+```
 
 ---
 
-## Services
+## Deployment (VDI)
 
-| Service | Role | Command |
-|---------|------|---------|
-| `perf-server.service` | Serves dashboard on port 8742 | `systemctl --user status perf-server` |
-| `perf-dashboard.timer` | Triggers daily pipeline at 12:07 | `systemctl --user status perf-dashboard.timer` |
-| `perf-dashboard.service` | Oneshot pipeline run | `systemctl --user start perf-dashboard` |
+See `deploy/vdi.md` for the full step-by-step guide. The short version:
+
+1. Create a Python virtual environment and install dependencies (run `deploy/install.sh`)
+2. Add a `.pth` file for YODATools into the venv's `site-packages`
+3. Copy `deploy/*.service` and `deploy/*.timer` to `~/.config/systemd/user/`
+4. `systemctl --user daemon-reload && systemctl --user enable --now perf-server perf-dashboard.timer`
+
+### Pushing code changes from Mac to VDI
 
 ```bash
-# Check all three at once
-systemctl --user status perf-server perf-dashboard.timer perf-dashboard
+rsync -av --progress \
+  --exclude='__pycache__' --exclude='*.pyc' --exclude='.pytest_cache' \
+  --exclude='*.egg-info' --exclude='artifacts/' --exclude='*.bak*' \
+  /path/to/perf_tracker/ <vdi-host>:/path/to/perf_tracker/
 
-# Restart HTTP server (needed after code sync or if port 8742 goes down)
-systemctl --user restart perf-server
-
-# View today's pipeline log
-journalctl --user -u perf-dashboard.service --since today
+# Reinstall the package after src/ changes
+ssh <vdi-host> "xoahenv/bin/pip install -e /path/to/perf_tracker --quiet"
 ```
 
-Logs also written to:
-- `/wrk/xcohdnobkup4/anupcs/vai/vai-6-2/qor/logs/dashboard.log`
-- `/wrk/xcohdnobkup4/anupcs/vai/vai-6-2/qor/logs/server.log`
+### Service execution order
+
+The `perf-dashboard.service` one-shot runs:
+
+1. `ExecStartPre` — `sync_rc2_goals.py` fetches the live goals spreadsheet and updates `rc2_goals_live.json`. Always exits 0 so a SharePoint outage never blocks the dashboard.
+2. `ExecStart` — `run_dashboard.py` fetches XOAH data, updates the history CSV, and writes all dated HTML snapshots.
+3. `ExecStartPost` — `gen_index.py` regenerates the landing page.
+
+### Regenerate all pages without new XOAH data
+
+```bash
+python scripts/run_dashboard.py --no-xoah config/tracking_config_vdi.json
+python deploy/gen_index.py /path/to/artifacts/dashboard
+```
 
 ---
 
@@ -193,88 +212,22 @@ Logs also written to:
 ```
 python scripts/run_dashboard.py [OPTIONS] [config_path]
 
-Options:
-  (none)               Full pipeline: workbook + XOAH fetch + dashboard
-  --from-workbook XLSX Load this workbook; use cached CSV; skip XOAH
-  --no-xoah            Use workbook from config; use cached CSV; skip XOAH
-  --from-csv CSV       Regenerate dashboard from CSV only; skip everything else
-  --output-dir DIR     Override dashboard output directory
-  --suite NAME         Suite name (used with --from-csv)
+  (none)          Full pipeline: workbook + XOAH fetch + HTML
+  --no-xoah       Skip XOAH fetch; regenerate HTML from existing CSV
+  --suite NAME    Process only this suite
+  --output-dir D  Override dashboard output directory
 ```
 
 ---
 
-## Updating the code
+## Forking this for your own project
 
-Code lives on your Mac and is pushed to the VDI via rsync. After any change:
+The tracker is intentionally generic. To adapt it:
 
-```bash
-# From Mac terminal
-VDIHOST=xcoanupcs40x
-VDI_QOR=/wrk/xcohdnobkup4/anupcs/vai/vai-6-2/qor
-MAC_TRACKER="/Users/anupcs/Library/CloudStorage/OneDrive-AdvancedMicroDevicesInc/Claude-Code/vai/vai 6.2/qor/perf_tracker"
+1. Replace the `_GOALS` dict in `model_goals.py` with your models and targets.
+2. Update the `SUITE_NAMES` in `config.py` to match your XOAH suite names.
+3. Update `tracking_config.json` with your workbook path, XOAH URL, and output directories.
+4. If you use a different spreadsheet for live goal sync, update `SHEET_TO_TEST` in `sync_rc2_goals.py` and point `SHARE_URL` at your file.
+5. Adjust milestone dates in `milestones.py`.
 
-rsync -av --progress \
-  --exclude='__pycache__' --exclude='*.pyc' --exclude='.pytest_cache' \
-  --exclude='*.egg-info' --exclude='artifacts/' --exclude='*.bak*' \
-  "$MAC_TRACKER/" $VDIHOST:${VDI_QOR}/perf_tracker/
-
-# Then on the VDI — reinstall the package if src/ changed
-/wrk/xcohdnobkup4/anupcs/vai/vai-6-2/qor/xoahenv/bin/pip install -e \
-    /wrk/xcohdnobkup4/anupcs/vai/vai-6-2/qor/perf_tracker --quiet
-
-# Restart HTTP server if deploy/ or dashboard assets changed
-systemctl --user restart perf-server
-```
-
----
-
-## Troubleshooting
-
-**Dashboard not updating / timer not firing:**
-```bash
-systemctl --user list-timers --all | grep perf
-journalctl --user -u perf-dashboard.service -n 50
-```
-
-**HTTP server down (port 8742 not responding):**
-```bash
-systemctl --user restart perf-server
-systemctl --user status perf-server
-```
-
-**YODATools import fails:**
-```bash
-# Check xoahenv has it
-/wrk/xcohdnobkup4/anupcs/vai/vai-6-2/qor/xoahenv/bin/python \
-    -c "import YODATools; print(YODATools.__file__)"
-
-# If it fails, re-check the .pth file is pointing to the right parent directory
-cat /wrk/xcohdnobkup4/anupcs/vai/vai-6-2/qor/xoahenv/lib/python3.*/site-packages/yodatools.pth
-
-# Verify Praveeni's env still works (the source of truth for the path)
-/wrk/xcohdnobkup6/praveeni/yoda_env/bin/python \
-    -c "import YODATools, os; print(os.path.dirname(os.path.dirname(YODATools.__file__)))"
-```
-
-**Board logs not readable (models show 'VART latency not found'):**
-
-This means XOAH returned test rows but the log files on the compute farm aren't accessible.
-The board log paths (under `/wrk/...`) must be NFS-mounted on xcoanupcs40x. Check:
-```bash
-ls /wrk/xcohdnobkup6/    # should list directories, not give a permissions error
-```
-
-If the mount is missing, use `--from-workbook` or `--from-csv` as a fallback until resolved.
-
-**Services don't survive logout:**
-```bash
-sudo loginctl enable-linger $USER
-loginctl show-user $USER | grep Linger   # must show Linger=yes
-```
-
----
-
-## First-time VDI setup
-
-See `deploy/vdi.md` for the complete step-by-step setup guide.
+The history CSV schema, dashboard layout, and systemd service files are all reusable as-is.

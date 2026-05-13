@@ -34,6 +34,10 @@ reports/
 src/perf_tracker/rc2_goals_live.json
 src/perf_tracker/rc2_goal_changes.json
 
+# Internal-only deploy scripts (not included in public repo)
+deploy/gen_goal_reconciliation.py
+deploy/gen_model_ref.py
+
 .cursor/
 docs/superpowers/
 .vscode/
