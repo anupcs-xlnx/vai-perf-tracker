@@ -1,0 +1,16 @@
+[Unit]
+Description=VAI 6.2 Perf Dashboard HTTP Server (port 8742)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/wrk/xcohdnobkup4/anupcs/vai/vai-6-2/qor/artifacts/dashboard
+ExecStart=/wrk/xcohdnobkup4/anupcs/vai/vai-6-2/qor/venv/bin/python \
+    -m http.server 8742 --bind 0.0.0.0
+Restart=always
+RestartSec=5
+StandardOutput=append:/wrk/xcohdnobkup4/anupcs/vai/vai-6-2/qor/logs/server.log
+StandardError=append:/wrk/xcohdnobkup4/anupcs/vai/vai-6-2/qor/logs/server.log
+
+[Install]
+WantedBy=default.target

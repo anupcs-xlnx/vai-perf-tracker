@@ -1,0 +1,19 @@
+{
+  "workbook_path": "/proj/vaiml_int/staff/praveeni/perf_tracker/VAI_6.2_P0_QOR_dashboard_baselines.xlsx",
+  "workbook_history_year": 2026,
+  "xoah_summary_url": "http://xoah/summary?canned=true&key=VAI_6_2_GEN2_REGRESSION&param=ACAS&category=VAI-ML&newhome=true&superSuiteName=VAI_6_2_GEN2_REGRESSION&user=z1aiebuild&relBranch=RAI_1.8",
+  "history_csv_path": "../artifacts/history/history.csv",
+  "dashboard_output_dir": "../artifacts/dashboard",
+  "suites": [
+    {
+      "name": "VE2_QOR_P0_HW",
+      "workbook_sheet": "Dashboard_QOR_P0_Baselines",
+      "history_csv_path": "../artifacts/history/VE2_QOR_P0_HW.csv"
+    },
+    {
+      "name": "VE2_QOR_O3_HW",
+      "workbook_sheet": "Dashboard_O3_Baselines",
+      "history_csv_path": "../artifacts/history/VE2_QOR_O3_HW.csv"
+    }
+  ]
+}

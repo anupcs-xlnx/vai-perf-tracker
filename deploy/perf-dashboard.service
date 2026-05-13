@@ -1,0 +1,26 @@
+[Unit]
+Description=VAI 6.2 Perf Dashboard Generator (one-shot)
+After=network.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/wrk/xcohdnobkup4/anupcs/vai/vai-6-2/qor/perf_tracker
+ExecStartPre=/wrk/xcohdnobkup4/anupcs/vai/vai-6-2/qor/xoahenv/bin/python \
+    deploy/sync_rc2_goals.py
+ExecStart=/wrk/xcohdnobkup4/anupcs/vai/vai-6-2/qor/xoahenv/bin/python \
+    scripts/run_dashboard.py \
+    config/tracking_config_vdi.json
+ExecStartPost=/wrk/xcohdnobkup4/anupcs/vai/vai-6-2/qor/xoahenv/bin/python \
+    deploy/gen_index.py \
+    /wrk/xcohdnobkup4/anupcs/vai/vai-6-2/qor/artifacts/dashboard
+ExecStartPost=/wrk/xcohdnobkup4/anupcs/vai/vai-6-2/qor/xoahenv/bin/python \
+    deploy/gen_goal_reconciliation.py \
+    /wrk/xcohdnobkup4/anupcs/vai/vai-6-2/qor/artifacts/dashboard
+ExecStartPost=/wrk/xcohdnobkup4/anupcs/vai/vai-6-2/qor/xoahenv/bin/python \
+    deploy/gen_model_ref.py \
+    /wrk/xcohdnobkup4/anupcs/vai/vai-6-2/qor/artifacts/dashboard
+StandardOutput=append:/wrk/xcohdnobkup4/anupcs/vai/vai-6-2/qor/logs/dashboard.log
+StandardError=append:/wrk/xcohdnobkup4/anupcs/vai/vai-6-2/qor/logs/dashboard.log
+
+[Install]
+WantedBy=default.target

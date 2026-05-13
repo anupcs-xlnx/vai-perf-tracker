@@ -1,0 +1,11 @@
+[Unit]
+Description=VAI 6.2 Perf Dashboard – daily refresh at noon
+Requires=perf-dashboard.service
+
+[Timer]
+OnCalendar=*-*-* 12:07:00
+Persistent=true
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target
