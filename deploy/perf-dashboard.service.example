@@ -1,0 +1,21 @@
+# Copy to perf-dashboard.service and replace all /path/to/... placeholders.
+[Unit]
+Description=Perf Dashboard Generator (one-shot)
+After=network.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/path/to/perf_tracker
+ExecStartPre=/path/to/venv/bin/python \
+    deploy/sync_rc2_goals.py
+ExecStart=/path/to/venv/bin/python \
+    scripts/run_dashboard.py \
+    config/tracking_config.json
+ExecStartPost=/path/to/venv/bin/python \
+    deploy/gen_index.py \
+    /path/to/artifacts/dashboard
+StandardOutput=append:/path/to/logs/dashboard.log
+StandardError=append:/path/to/logs/dashboard.log
+
+[Install]
+WantedBy=default.target

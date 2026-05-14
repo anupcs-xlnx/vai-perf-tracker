@@ -1,102 +1,55 @@
 # VAI Perf Tracker
 
-Automated daily latency dashboard for AMD Vitis AI QoR tracking. Pulls nightly VART test results
-from an Elasticsearch test database (XOAH) via YODATools, appends to a history CSV, and generates
+Automated daily VART latency dashboard for Vitis AI QoR tracking. Pulls nightly test results from
+an Elasticsearch test database (XOAH) via YODATools, appends to a history CSV, and generates
 dark-themed AMD-styled HTML dashboards served over HTTP.
 
 Inspired by [Praveen Iyer's perf tracker](http://fisweb:8080/proj/vaiml_int/staff/praveeni/perf_tracker).
 
 ---
 
-## Dashboard pages
+## Navigating the dashboard
 
 ### Landing page (`index.html`)
 
-The landing page shows:
-- **Milestone timeline** — key release dates (RC1, RC2, RC2+, Field Bash, etc.) with a "days remaining" countdown
+- **Milestone timeline** — key release dates with a days-remaining countdown
 - **Suite calendar** — which suite ran on which date, color-coded pass/fail
-- **Field Bash models** — a focused table of the subset of models being demonstrated at the Field Validation event, with RC1 and RC2+ goal comparisons
+- **Field Bash models** — focused table of models being demonstrated at the validation event, with RC1 and RC2+ goal comparisons
 
 ### Daily snapshot (`<SUITE>/<YYYY-MM-DD>.html`)
 
-Each suite gets one HTML file per day. The page has two main sections:
+Each test suite gets one HTML snapshot per day. The page has two sections:
 
-**Summary table** (top)
-
-One row per model. Columns:
+**Summary table** — one row per model:
 
 | Column | What it shows |
 |--------|---------------|
-| Model | Human-readable model name (links to the detail card below) |
+| Model | Human-readable model name; links to the detail card below |
 | Customer | Customer or program the model belongs to |
-| VAI 6.2 Latency | Measured VART latency for this run, in ms. Steel-blue border. |
+| VAI 6.2 Latency | Measured VART latency for this run (ms) — steel-blue border |
 | Suite | Which XOAH suite run produced this result |
-| VAI 6.2 Goal | RC2+ target latency in ms. Muted-red border. |
-| RC1 Goal | RC1 target latency in ms |
+| VAI 6.2 Goal | RC2+ target latency (ms) — muted-red border |
+| RC1 Goal | RC1 target latency (ms) |
 | VAI 6.1 Latency | Baseline from the prior release for reference |
-| Trend | Direction vs ~7 days ago (↑ worse, ↓ better, — no prior data) |
+| Trend | Direction vs ~7 days ago (↓ better, ↑ worse, `N/A` = oldest entry, `—` = no current reading) |
 | Bash | Whether this model is on the Field Bash demo list |
 
 **Row color coding:**
 - Green — at or below goal
 - Yellow — within 5% of goal
 - Red — more than 5% above goal
-- Gray — no goal defined for this model
+- Gray — no goal defined
 
-**RC2+ goal change footnote:** If any model's RC2+ goal changed since initial publication (tracked from a live spreadsheet), the changed cells are marked with a gold `*` and a footnote table below the summary lists the before/after values and dates.
+**RC2+ goal change footnote:** If any model's RC2+ goal changed since initial publication, the
+changed cells are marked with a gold `*` and a footnote table below the summary shows the
+before/after values and dates.
 
-**Per-model detail cards** (below summary)
-
-Clicking a model name in the summary table scrolls to its detail card. Each card shows:
-- A latency trend chart with milestone markers
-- A full table of every historical run with date, latency, and the suite that produced it
+**Per-model detail cards** — below the summary, each model has a latency trend chart with
+milestone markers and a full table of every historical run.
 
 ### Latest symlink (`<SUITE>_latest.html`)
 
 Always points to the most recent snapshot. Bookmark this for day-to-day monitoring.
-
----
-
-## Dashboard design decisions
-
-**Dark AMD theme.** Black background (`#000000`), white text (`#ffffff`), AMD corporate colors for
-accents. Off-white background for the summary table to make it easy to read at a glance.
-
-**Column border highlights instead of background colors.** The latency and goal columns use colored
-borders (steel-blue and muted-red respectively) rather than background color fills. This preserves
-the green/yellow/red row status colors so you can see at a glance which models are on track without
-the column highlight masking the row status.
-
-**`(ms)` in lowercase.** CSS `text-transform: uppercase` is applied to table headers for visual
-consistency. The `(ms)` unit is wrapped in `<span style="text-transform:none">` to prevent it from
-being rendered as `(MS)`.
-
-**History CSV as the long-term cache.** XOAH only retains run data for a limited time. The pipeline
-writes every fetched result to a CSV immediately. On subsequent runs, already-fetched rows are
-skipped. Run the pipeline daily or you will lose data that falls out of XOAH's retention window.
-
-**Trend indicator uses a 7-day lookback with fallback.** The trend column compares today's latency
-to the closest reading at least 7 days prior. If no reading exists that far back, it falls back to
-the oldest available reading. If this is the very first entry for a model, it shows `N/A` (no prior
-data exists yet, not a missing reading).
-
-**Live RC2+ goal sync.** The RC2+ goal values in `model_goals.py` are hardcoded as a safe fallback.
-A separate daily script (`deploy/sync_rc2_goals.py`) downloads the live goals spreadsheet from
-SharePoint via the Microsoft Graph API, diffs column D of the `impr_6.2` tab against the current
-values, and writes any changes to `src/perf_tracker/rc2_goals_live.json`. This file is loaded at
-import time by `model_goals.py` to override the hardcoded values. A persistent changelog
-(`rc2_goal_changes.json`) records every change with date, old value, and new value — this powers
-the `*` asterisk footnote in the dashboard.
-
-**Token auto-refresh for SharePoint access.** The Microsoft Graph access token expires in ~1 hour.
-The sync script checks the `expires_at` field in `~/.config/microsoft-graph/token.json` and
-refreshes it automatically using the refresh token (valid ~90 days) before downloading the
-spreadsheet. The refreshed token is written back to disk. No manual action is needed unless the
-refresh token itself expires.
-
-**PDT timezone display.** All timestamps are shown in PDT (UTC-7). The VDI runs MDT (UTC-6); the
-pipeline applies a `-1h` offset before rendering timestamps. The systemd timer fires at
-12:07 MDT = **11:07 AM PDT**.
 
 ---
 
@@ -109,26 +62,23 @@ perf_tracker/
 │   ├── dashboard.py            # HTML generation
 │   ├── history.py              # History CSV read/write
 │   ├── milestones.py           # Milestone dates
-│   ├── model_goals.py          # RC1/RC2+ goals per model; loads live overrides at import
+│   ├── model_goals.py          # RC1/RC2+ goals; loads live overrides at import
 │   ├── pipeline.py             # Orchestration
 │   ├── workbook.py             # Excel baseline parsing
 │   └── xoah.py                 # XOAH query + board log extraction via YODATools
 ├── scripts/
 │   └── run_dashboard.py        # CLI entry point
 ├── config/
-│   ├── tracking_config.json         # Dev config (Mac paths)
-│   └── tracking_config_vdi.json     # Production config (VDI paths)
+│   └── tracking_config.json    # Config template — copy and fill in your paths
 ├── deploy/
-│   ├── install.sh               # One-time VDI venv setup
-│   ├── vdi.md                   # Step-by-step VDI deploy guide
-│   ├── gen_index.py             # Generates index.html landing page
-│   ├── sync_rc2_goals.py        # Downloads live RC2+ goals from SharePoint
-│   ├── perf-dashboard.service   # systemd oneshot (sync goals → dashboard → index)
-│   ├── perf-dashboard.timer     # systemd daily timer
-│   └── perf-server.service      # systemd HTTP server (port 8742)
-└── artifacts/                   # Generated outputs (not committed)
-    ├── history/
-    │   └── <SUITE>.csv
+│   ├── install.sh                      # One-time setup script
+│   ├── gen_index.py                    # Generates index.html landing page
+│   ├── sync_rc2_goals.py               # Downloads live RC2+ goals from SharePoint
+│   ├── perf-dashboard.service.example  # systemd oneshot template
+│   ├── perf-dashboard.timer            # systemd daily timer
+│   └── perf-server.service.example     # systemd HTTP server template
+└── artifacts/                  # Generated outputs (not committed)
+    ├── history/<SUITE>.csv
     └── dashboard/
         ├── index.html
         ├── <SUITE>_latest.html
@@ -140,69 +90,128 @@ perf_tracker/
 ## Dependencies
 
 - **Python 3.10+**
-- **YODATools** — AMD internal library for querying XOAH (Elasticsearch test database). Not a pip package; lives on the shared NFS filesystem at `/proj/testcases/xtc/tools/PROD/libs/python`. Made importable via a `.pth` file in the Python environment.
-- **elasticsearch < 8** — YODATools uses the v7 API; v8 removes the `host=` kwarg and breaks it.
-- **openpyxl** — for reading the baseline workbook and the live goals spreadsheet
-- **pyyaml**, **pexpect**, **cachetools**, **numpy**, **pandas**, **requests**, **paramiko** — YODATools dependencies
+- **YODATools** — AMD internal library for querying XOAH (Elasticsearch). Not a pip package; must
+  be made importable via a `.pth` file in your Python environment (see [Setup](#setup) below).
+- **`elasticsearch < 8`** — YODATools uses the v7 API; v8 drops the `host=` kwarg and breaks it.
+- **`openpyxl`** — for reading the baseline workbook and live goals spreadsheet
+- **`pyyaml`, `pexpect`, `cachetools`, `numpy`, `pandas`, `requests`, `paramiko`** — YODATools runtime dependencies
 
 ---
 
-## Data flow
+## Setup
 
+### 1. Configure
+
+Copy `config/tracking_config.json` and fill in your paths:
+
+```json
+{
+  "workbook_path": "/path/to/your/baselines.xlsx",
+  "workbook_history_year": 2026,
+  "xoah_summary_url": "http://your-xoah-host/summary?...",
+  "history_csv_path": "/path/to/artifacts/history/history.csv",
+  "dashboard_output_dir": "/path/to/artifacts/dashboard",
+  "suites": [
+    {
+      "name": "YOUR_SUITE_NAME",
+      "workbook_sheet": "YourWorkbookSheetName",
+      "history_csv_path": "/path/to/artifacts/history/YOUR_SUITE_NAME.csv"
+    }
+  ]
+}
 ```
-XOAH (Elasticsearch)
-    └── YODATools → board log files → VART latency
-           │
-       pipeline.py
-           │
-       history CSV  ←── permanent record; survives XOAH retention window
-           │
-       dashboard.py → dated HTML snapshots + latest.html
-           │
-       gen_index.py → index.html landing page
-           │
-       http.server (port 8742)
 
-SharePoint XLSX
-    └── sync_rc2_goals.py → rc2_goals_live.json → model_goals.py (overrides)
-```
+Update `src/perf_tracker/model_goals.py` with your model names and RC1/RC2+ targets.
+Update `src/perf_tracker/milestones.py` with your milestone dates.
 
----
-
-## Deployment (VDI)
-
-See `deploy/vdi.md` for the full step-by-step guide. The short version:
-
-1. Create a Python virtual environment and install dependencies (run `deploy/install.sh`)
-2. Add a `.pth` file for YODATools into the venv's `site-packages`
-3. Copy `deploy/*.service` and `deploy/*.timer` to `~/.config/systemd/user/`
-4. `systemctl --user daemon-reload && systemctl --user enable --now perf-server perf-dashboard.timer`
-
-### Pushing code changes from Mac to VDI
+### 2. Create a Python environment
 
 ```bash
-rsync -av --progress \
-  --exclude='__pycache__' --exclude='*.pyc' --exclude='.pytest_cache' \
-  --exclude='*.egg-info' --exclude='artifacts/' --exclude='*.bak*' \
-  /path/to/perf_tracker/ <vdi-host>:/path/to/perf_tracker/
-
-# Reinstall the package after src/ changes
-ssh <vdi-host> "xoahenv/bin/pip install -e /path/to/perf_tracker --quiet"
+python3 -m venv venv
+venv/bin/pip install --upgrade pip
+venv/bin/pip install openpyxl "elasticsearch<8" pyyaml pexpect cachetools numpy pandas requests paramiko
+venv/bin/pip install -e .
 ```
+
+### 3. Wire in YODATools
+
+YODATools is not a pip package. Make it importable by adding a `.pth` file pointing to its parent
+directory:
+
+```bash
+# Find your Python version
+PY_VER=$(venv/bin/python -c "import sys; print(f'python{sys.version_info.major}.{sys.version_info.minor}')")
+
+# Create the .pth file
+echo "/path/to/YODATools/parent" > venv/lib/${PY_VER}/site-packages/yodatools.pth
+
+# Verify
+venv/bin/python -c "import YODATools; print('OK:', YODATools.__file__)"
+```
+
+### 4. Run the first generation
+
+```bash
+venv/bin/python scripts/run_dashboard.py config/tracking_config.json
+```
+
+On first run this fetches all historical XOAH data for your suites, which may take several minutes.
+Subsequent runs only fetch rows not already in the history CSV.
+
+### 5. Serve the dashboard
+
+```bash
+venv/bin/python -m http.server --bind 0.0.0.0 <PORT> \
+    --directory /path/to/artifacts/dashboard
+```
+
+Open `http://<your-host>:<PORT>/` in a browser.
+
+---
+
+## Automating with systemd
+
+For daily automation on a Linux host where you have a persistent user session:
+
+1. Copy the example service files and edit paths and port:
+   ```bash
+   cp deploy/perf-dashboard.service.example deploy/perf-dashboard.service
+   cp deploy/perf-server.service.example    deploy/perf-server.service
+   # edit both files — replace all /path/to/... and <PORT>
+   ```
+
+2. Install and enable:
+   ```bash
+   mkdir -p ~/.config/systemd/user
+   cp deploy/perf-dashboard.service deploy/perf-dashboard.timer deploy/perf-server.service \
+       ~/.config/systemd/user/
+   systemctl --user daemon-reload
+   systemctl --user enable --now perf-server.service
+   systemctl --user enable --now perf-dashboard.timer
+   ```
+
+3. Ensure services survive logout (run once, requires sudo):
+   ```bash
+   sudo loginctl enable-linger $USER
+   ```
+
+The timer fires daily at 12:07 by default — edit `deploy/perf-dashboard.timer` to change the time.
 
 ### Service execution order
 
-The `perf-dashboard.service` one-shot runs:
+`perf-dashboard.service` runs three steps in sequence:
 
-1. `ExecStartPre` — `sync_rc2_goals.py` fetches the live goals spreadsheet and updates `rc2_goals_live.json`. Always exits 0 so a SharePoint outage never blocks the dashboard.
-2. `ExecStart` — `run_dashboard.py` fetches XOAH data, updates the history CSV, and writes all dated HTML snapshots.
-3. `ExecStartPost` — `gen_index.py` regenerates the landing page.
+1. **ExecStartPre** — `sync_rc2_goals.py` fetches the live goals spreadsheet from SharePoint and
+   updates `rc2_goals_live.json`. Always exits 0 so a SharePoint outage never blocks the dashboard.
+2. **ExecStart** — `run_dashboard.py` fetches XOAH data, updates the history CSV, and writes all
+   HTML snapshots.
+3. **ExecStartPost** — `gen_index.py` regenerates the landing page.
 
-### Regenerate all pages without new XOAH data
+### Regenerate without fetching new data
 
 ```bash
-python scripts/run_dashboard.py --no-xoah config/tracking_config_vdi.json
-python deploy/gen_index.py /path/to/artifacts/dashboard
+venv/bin/python scripts/run_dashboard.py --no-xoah config/tracking_config.json
+venv/bin/python deploy/gen_index.py /path/to/artifacts/dashboard
 ```
 
 ---
@@ -220,14 +229,50 @@ python scripts/run_dashboard.py [OPTIONS] [config_path]
 
 ---
 
-## Forking this for your own project
+## Live RC2+ goal sync (optional)
 
-The tracker is intentionally generic. To adapt it:
+If your team maintains a live goals spreadsheet on SharePoint, `deploy/sync_rc2_goals.py` can
+download it daily and update the dashboard's RC2+ targets automatically.
 
-1. Replace the `_GOALS` dict in `model_goals.py` with your models and targets.
-2. Update the `SUITE_NAMES` in `config.py` to match your XOAH suite names.
-3. Update `tracking_config.json` with your workbook path, XOAH URL, and output directories.
-4. If you use a different spreadsheet for live goal sync, update `SHEET_TO_TEST` in `sync_rc2_goals.py` and point `SHARE_URL` at your file.
-5. Adjust milestone dates in `milestones.py`.
+Update the `SHEET_TO_TEST` mapping and `SHARE_URL` in `sync_rc2_goals.py` for your spreadsheet.
+Authentication uses a Microsoft Graph token stored at `~/.config/microsoft-graph/token.json`
+(obtained via the `m365-teams` auth script). The sync script auto-refreshes the access token using
+the stored refresh token so the VDI runs independently without a laptop.
+
+When a goal changes, the dashboard marks the affected cell with a gold `*` and renders a footnote
+table showing the before/after values and date of change.
+
+---
+
+## Design decisions
+
+**Column borders instead of background highlights.** The latency and goal columns use colored
+borders (steel-blue and muted-red) rather than fills, so the green/yellow/red row status colors
+remain fully visible without the column highlight overriding them.
+
+**`(ms)` stays lowercase.** CSS `text-transform: uppercase` on table headers would render `(ms)` as
+`(MS)`. It is wrapped in `<span style="text-transform:none">` to prevent this.
+
+**History CSV as the long-term cache.** XOAH only retains run data for a limited window. The
+pipeline writes every fetched result to CSV immediately and never re-fetches a row already there.
+Run the pipeline daily or data that falls out of XOAH's retention window is lost permanently.
+
+**Trend uses a 7-day lookback with fallback.** The trend column compares today's latency to the
+nearest reading at least 7 days prior. If no such reading exists, it falls back to the oldest
+available reading. If this is the model's first-ever entry, it shows `N/A` rather than `—` (which
+means the current reading is missing, not that prior data doesn't exist yet).
+
+**The sync script always exits 0.** A SharePoint outage or expired token must never prevent the
+dashboard from regenerating. Failures are logged but the pipeline continues with cached values.
+
+---
+
+## Adapting for your own project
+
+1. Replace `_GOALS` in `model_goals.py` with your models and targets.
+2. Update suite names in `config/tracking_config.json` to match your XOAH suite names.
+3. Point `workbook_path` at your own baseline Excel workbook and update the sheet names.
+4. Adjust milestone dates in `milestones.py`.
+5. If using SharePoint goal sync, update `SHEET_TO_TEST` and `SHARE_URL` in `sync_rc2_goals.py`.
 
 The history CSV schema, dashboard layout, and systemd service files are all reusable as-is.

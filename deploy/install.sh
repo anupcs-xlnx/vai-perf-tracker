@@ -1,25 +1,32 @@
 #!/usr/bin/env bash
-# Deploy perf-tracker to xcoanupcs40x (no sudo required).
-# Run this script once from the VDI, inside the project directory.
-# Usage:  bash deploy/install.sh
+# One-time setup: creates a Python venv, installs dependencies, and wires up
+# systemd user services for daily automation.
+#
+# Run from the repo root:  bash deploy/install.sh
+#
+# Prerequisites:
+#   - Python 3.10+
+#   - systemd (user session)
+#   - YODATools accessible on your filesystem (see README.md)
+#   - Copy deploy/perf-dashboard.service.example → deploy/perf-dashboard.service
+#     and deploy/perf-server.service.example → deploy/perf-server.service,
+#     then edit both with your actual paths before running this script.
 
 set -euo pipefail
 
-QOR_ROOT="/wrk/xcohdnobkup4/anupcs/vai/vai-6-2/qor"
-TRACKER_ROOT="${QOR_ROOT}/perf_tracker"
-VENV="${QOR_ROOT}/venv"
-DASHBOARD_DIR="${QOR_ROOT}/artifacts/dashboard"
-LOG_DIR="${QOR_ROOT}/logs"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+VENV="${REPO_ROOT}/venv"
+ARTIFACTS="${REPO_ROOT}/artifacts"
 SYSTEMD_USER="${HOME}/.config/systemd/user"
 
-# ── 1. Create directory layout ───────────────────────────────────────────────
+# ── 1. Directory layout ───────────────────────────────────────────────────────
 mkdir -p \
-    "${DASHBOARD_DIR}" \
-    "${QOR_ROOT}/artifacts/history" \
-    "${LOG_DIR}" \
+    "${ARTIFACTS}/dashboard" \
+    "${ARTIFACTS}/history" \
+    "${ARTIFACTS}/logs" \
     "${SYSTEMD_USER}"
 
-# ── 2. Python venv ───────────────────────────────────────────────────────────
+# ── 2. Python venv ────────────────────────────────────────────────────────────
 if [ ! -d "${VENV}" ]; then
     echo "Creating venv at ${VENV} ..."
     python3 -m venv "${VENV}"
@@ -27,50 +34,42 @@ fi
 
 "${VENV}/bin/pip" install --upgrade pip --quiet
 "${VENV}/bin/pip" install openpyxl --quiet
-# Install perf_tracker in editable mode
-"${VENV}/bin/pip" install -e "${TRACKER_ROOT}" --quiet
+"${VENV}/bin/pip" install -e "${REPO_ROOT}" --quiet
 
-echo "venv ready."
+# YODATools runtime dependencies
+"${VENV}/bin/pip" install \
+    "elasticsearch<8" \
+    pyyaml pexpect cachetools numpy pandas requests paramiko \
+    --quiet
 
-# ── 3. Install systemd user units ────────────────────────────────────────────
+echo "venv ready at ${VENV}"
+
+# ── 3. Wire in YODATools via .pth file ───────────────────────────────────────
+# Edit YODA_PATH below to point to your YODATools parent directory.
+YODA_PATH="/path/to/YODATools/parent"
+PY_VER=$("${VENV}/bin/python" -c "import sys; print(f'python{sys.version_info.major}.{sys.version_info.minor}')")
+echo "${YODA_PATH}" > "${VENV}/lib/${PY_VER}/site-packages/yodatools.pth"
+echo "YODATools .pth written → ${YODA_PATH}"
+
+# ── 4. Install systemd user units ─────────────────────────────────────────────
 for unit in perf-dashboard.service perf-dashboard.timer perf-server.service; do
-    src="${TRACKER_ROOT}/deploy/${unit}"
-    dst="${SYSTEMD_USER}/${unit}"
-    cp "${src}" "${dst}"
-    echo "Installed: ${dst}"
+    src="${REPO_ROOT}/deploy/${unit}"
+    if [ ! -f "${src}" ]; then
+        echo "WARNING: ${src} not found — copy the .example file and edit paths first"
+        continue
+    fi
+    cp "${src}" "${SYSTEMD_USER}/${unit}"
+    echo "Installed: ${SYSTEMD_USER}/${unit}"
 done
 
 systemctl --user daemon-reload
 
-# Enable and start the HTTP server
 systemctl --user enable --now perf-server.service
-echo "perf-server.service started on port 8742."
+echo "perf-server.service started"
 
-# Enable the daily refresh timer
 systemctl --user enable --now perf-dashboard.timer
-echo "perf-dashboard.timer enabled (daily at 12:07)."
-
-# ── 4. Run first dashboard generation ────────────────────────────────────────
-echo ""
-echo "Running initial dashboard generation (may take a while with XOAH) ..."
-"${VENV}/bin/python" "${TRACKER_ROOT}/scripts/run_dashboard.py" \
-    "${TRACKER_ROOT}/config/tracking_config_vdi.json"
+echo "perf-dashboard.timer enabled"
 
 echo ""
-echo "Done!  Dashboard available at:"
-echo "  http://$(hostname):8742/"
-echo ""
-echo "To refresh manually (e.g. after dropping a new workbook or CSV):"
-echo "  # From workbook:"
-echo "  ${VENV}/bin/python ${TRACKER_ROOT}/scripts/run_dashboard.py \\"
-echo "      --from-workbook /path/to/new.xlsx \\"
-echo "      ${TRACKER_ROOT}/config/tracking_config_vdi.json"
-echo ""
-echo "  # From CSV:"
-echo "  ${VENV}/bin/python ${TRACKER_ROOT}/scripts/run_dashboard.py \\"
-echo "      --from-csv /path/to/history.csv \\"
-echo "      ${TRACKER_ROOT}/config/tracking_config_vdi.json"
-echo ""
-echo "Logs:"
-echo "  ${LOG_DIR}/dashboard.log"
-echo "  ${LOG_DIR}/server.log"
+echo "Done. Run the first dashboard generation:"
+echo "  ${VENV}/bin/python ${REPO_ROOT}/scripts/run_dashboard.py ${REPO_ROOT}/config/tracking_config.json"
